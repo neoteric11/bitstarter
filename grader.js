@@ -22,9 +22,10 @@ References:
 */
 
 var fs = require('fs');
+var rest = require('restler');
+var util = require('util');
 var program = require('commander');
 var cheerio = require('cheerio');
-var HTMLFILE_DEFAULT = "index.html";
 var CHECKSFILE_DEFAULT = "checks.json";
 
 var assertFileExists = function(infile) {
@@ -38,6 +39,10 @@ var assertFileExists = function(infile) {
 
 var cheerioHtmlFile = function(htmlfile) {
     return cheerio.load(fs.readFileSync(htmlfile));
+};
+
+var cheerioResponse = function(response) {
+    return cheerio.load(response);
 };
 
 var loadChecks = function(checksfile) {
@@ -55,6 +60,27 @@ var checkHtmlFile = function(htmlfile, checksfile) {
     return out;
 };
 
+var buildfn = function(checksfile) {
+    var checkResponse = function(result, response) {
+        if (result instanceof Error) {
+            console.error('Error: ' + util.format(result.message));
+            process.exit(1);
+        }
+        else {
+            $ = cheerioResponse(result);
+            var checks = loadChecks(checksfile).sort();
+            var out = {};
+            for(var ii in checks) {
+                var present = $(checks[ii]).length > 0;
+                out[checks[ii]] = present;
+            }
+            var outJsonURL = JSON.stringify(out, null, 4);
+            console.log(outJsonURL);
+        }
+    };
+    return checkResponse;
+};
+
 var clone = function(fn) {
     // Workaround for commander.js issue.
     // http://stackoverflow.com/a/6772648
@@ -64,11 +90,26 @@ var clone = function(fn) {
 if(require.main == module) {
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
-        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists))
+        .option('-u, --url <URL>', 'URL of website to check')
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+    if (program.url) {
+        if (program.file) {
+            console.error("You must specify either a URL or a filepath, not both.");
+            process.exit(1);
+        }
+        var responseFunc = buildfn(program.checks);
+        rest.get(program.url).on('complete', responseFunc);
+    }
+    else if (program.file) {
+        var checkJsonFile = checkHtmlFile(program.file, program.checks);
+        var outJsonFile = JSON.stringify(checkJsonFile, null, 4);
+        console.log(outJsonFile);
+    }
+    else {
+        console.error("You must specify either a URL or a filepath.");
+        process.exit(1);
+    }
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
